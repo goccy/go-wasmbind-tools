@@ -1,0 +1,17 @@
+{{- $sources := .Sources }}
+
+TARGET := out/{{ .Output }}
+
+CC := {{ .Compiler }}
+OPTS := {{- range .CompilerOptions }} {{ . }}{{- end }}
+INCLUDES := {{- range .IncludePaths }} -I{{ . }}{{- end }}
+
+LINKER_OPTS := {{- range .LinkerOptions }} {{ . }}{{- end }}
+
+build: {{- range $sources }} out/{{ .Name }}.o {{- end }}
+	$(CC) $(LINKER_OPTS) -o $(TARGET) {{- range $sources }} out/{{ .Name }}.o{{- end }}
+
+{{ range $sources }}
+out/{{ .Name }}.o:
+	$(CC) -o out/{{ .Name }}.o $(OPTS) $(INCLUDES) -c {{ .Path }}
+{{ end }}
