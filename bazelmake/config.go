@@ -14,6 +14,7 @@ type Config struct {
 	Output          string                      `yaml:"output"`
 	Compiler        string                      `yaml:"compiler"`
 	IncludePaths    []string                    `yaml:"include_paths"`
+	Sources         []string                    `yaml:"sources"`
 	CompilerOptions []string                    `yaml:"compiler_options"`
 	LinkerOptions   []string                    `yaml:"linker_options"`
 }

@@ -14,6 +14,7 @@ type Makefile struct {
 	Root            string
 	Output          string
 	Compiler        string
+	ExtSources      []string
 	IncludePaths    []string
 	CompilerOptions []string
 	LinkerOptions   []string
@@ -29,7 +30,19 @@ type NameAndPath struct {
 
 func (m *Makefile) Sources() []*NameAndPath {
 	var ret []*NameAndPath
+	for _, src := range m.ExtSources {
+		name := strings.ReplaceAll(strings.TrimSuffix(src, filepath.Ext(src)), "/", "_")
+		ret = append(ret, &NameAndPath{
+			Name: name,
+			Path: src,
+		})
+	}
 	for _, lib := range m.TargetLibs {
+		fqdn := lib.FQDN()
+		if _, exists := m.cachedLibraries[fqdn]; exists {
+			continue
+		}
+		m.cachedLibraries[fqdn] = struct{}{}
 		for _, src := range lib.SourcePaths(m.Root) {
 			name := strings.ReplaceAll(strings.TrimSuffix(src, filepath.Ext(src)), "/", "_")
 			ret = append(ret, &NameAndPath{
@@ -80,6 +93,9 @@ func CreateMakefile(cfg *Config) ([]byte, error) {
 	for includePath := range includePathMap {
 		includePaths = append(includePaths, includePath)
 	}
+	for _, includePath := range cfg.IncludePaths {
+		includePaths = append(includePaths, filepath.Join(cfg.Root, includePath))
+	}
 	sort.Strings(includePaths)
 	tmpl, err := template.New("").Parse(string(makefileData))
 	if err != nil {
@@ -90,7 +106,8 @@ func CreateMakefile(cfg *Config) ([]byte, error) {
 		Root:            cfg.Root,
 		Output:          cfg.Output,
 		Compiler:        cfg.Compiler,
-		IncludePaths:    append(includePaths, cfg.IncludePaths...),
+		IncludePaths:    includePaths,
+		ExtSources:      cfg.Sources,
 		CompilerOptions: cfg.CompilerOptions,
 		LinkerOptions:   cfg.LinkerOptions,
 		TargetLibs:      targetLibs,

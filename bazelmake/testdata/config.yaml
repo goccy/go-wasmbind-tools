@@ -3,6 +3,18 @@ targets:
   - library: zetasql
     path: zetasql/parser
     name: parser
+  - library: zetasql
+    path: zetasql/public
+    name: analyzer
+  - library: zetasql
+    path: zetasql/public
+    name: catalog
+  - library: zetasql
+    path: zetasql/public
+    name: simple_catalog
+  - library: zetasql
+    path: zetasql/public
+    name: sql_formatter
 ignores:
   - path: bazel
     name: flex
@@ -37,21 +49,18 @@ libraries:
   - name: com_github_grpc_grpc
   - name: com_google_riegeli
 
-output: zetasql.wasm
+output: example
 compiler: clang++
 include_paths:
   - protobuf/src
   - flex/src
+
+sources:
+  - testdata/main.cc
+
 compiler_options:
-  - --no-entry
   - -fno-exceptions
   - -funsigned-char
-  - -sWASM=1
-  - -sUSE_PTHREADS=1
-  - -sSTANDALONE_WASM
-  - -sEXPORT_ALL
-  - -sSTACK_SIZE=1MB
-  - --emit-symbol-map
   - -std=c++1z
   - -DU_COMMON_IMPLEMENTATION
   - -DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash
