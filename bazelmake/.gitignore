@@ -28,6 +28,9 @@ testdata/src/**/*.yml
 *.sh
 *.csv
 *.rc
+*.java
+*.png
+*.pdf
 Makefile.in
 bad_utf8_string
 *.input_file
@@ -36,4 +39,4 @@ testdata/**/*golden_packed*
 testdata/**/*.template
 testdata/**/*.go
 *.textproto
-testdata/src/differential-privacy
+
