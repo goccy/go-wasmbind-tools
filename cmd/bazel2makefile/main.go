@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/goccy/go-yaml"
 	"github.com/jessevdk/go-flags"
 
 	"github.com/goccy/go-wasmbind-tools/bazelmake"
@@ -15,20 +14,11 @@ type Option struct {
 }
 
 func run(args []string, opt *Option) error {
-	cfgFile, err := os.ReadFile(opt.Config)
+	cfg, err := bazelmake.LoadConfig(opt.Config)
 	if err != nil {
 		return err
 	}
-	var cfg bazelmake.Config
-	if err := yaml.UnmarshalWithOptions(cfgFile, &cfg, yaml.Strict()); err != nil {
-		return err
-	}
-	resolver := bazelmake.NewResolver(cfg)
-	libs, err := resolver.Resolve()
-	if err != nil {
-		return err
-	}
-	makefile, err := bazelmake.CreateMakefile(cfg, libs)
+	makefile, err := bazelmake.CreateMakefile(cfg)
 	if err != nil {
 		return err
 	}
