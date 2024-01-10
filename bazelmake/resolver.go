@@ -305,7 +305,12 @@ func (r *Resolver) resolveProtoLibrary(list []build.Expr) *CCLibrary {
 				}
 			}
 		case "deps":
-			ret.Dependencies = r.getTexts(rhs.(*build.ListExpr))
+			switch v := rhs.(type) {
+			case *build.Comprehension:
+				log.Printf("deps: %+v", v)
+			case *build.ListExpr:
+				ret.Dependencies = r.getTexts(v)
+			}
 		}
 	}
 	return &ret
