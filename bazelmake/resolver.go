@@ -49,7 +49,7 @@ func (lib *CCLibrary) FQDN() string {
 func (lib *CCLibrary) SourcePaths(root string) []string {
 	ret := make([]string, 0, len(lib.Sources))
 	for _, src := range lib.Sources {
-		ret = append(ret, filepath.Join(root, lib.File.Path, src))
+		ret = append(ret, filepath.Join(root, lib.File.Library.Root, lib.File.Path, src))
 	}
 	return ret
 }
@@ -154,15 +154,15 @@ func (r *Resolver) resolveLibraryBuildFiles(lib *LibraryConfig) error {
 			}
 			libDir := filepath.Dir(path)
 			relPath := strings.TrimPrefix(libDir, libRoot)
-			relPathWithLibName := filepath.Join(filepath.Base(lib.Root), strings.TrimPrefix(relPath, "/"))
+			relPath = strings.TrimPrefix(relPath, "/")
 			file := &File{
-				Path:        relPathWithLibName,
+				Path:        relPath,
 				Library:     lib,
 				CCLibraries: libs,
 				cclibMap:    cclibMap,
 				otherLibMap: otherLibMap,
 			}
-			r.libraryFileMap[lib][relPathWithLibName] = file
+			r.libraryFileMap[lib][relPath] = file
 			for _, lib := range libs {
 				lib.File = file
 			}
@@ -380,7 +380,6 @@ func (r *Resolver) resolveLibraryLocation(file *File, dep string) (*LibraryLocat
 					ret.Path = parts[0]
 				} else {
 					// @xyz//:abcd
-					ret.Path = filepath.Base(lib.Root)
 				}
 			} else if path != "" {
 				// @xyz//path/to
@@ -388,7 +387,6 @@ func (r *Resolver) resolveLibraryLocation(file *File, dep string) (*LibraryLocat
 				ret.CCLibName = filepath.Base(path)
 			} else {
 				// @xyz//
-				ret.Path = filepath.Base(lib.Root)
 				ret.CCLibName = filepath.Base(lib.Root)
 			}
 		} else {
@@ -397,10 +395,8 @@ func (r *Resolver) resolveLibraryLocation(file *File, dep string) (*LibraryLocat
 			if !exists {
 				return nil, fmt.Errorf("failed to find library by name: %s", dep)
 			}
-			path := filepath.Base(lib.Root)
 			ret.Library = lib
-			ret.Path = path
-			ret.CCLibName = path
+			ret.CCLibName = filepath.Base(lib.Root)
 		}
 	case ':':
 		dep := strings.TrimPrefix(dep, ":")
@@ -429,9 +425,6 @@ func (r *Resolver) resolveLibraryLocation(file *File, dep string) (*LibraryLocat
 		ret.Path = file.Path
 		ret.CCLibName = dep
 	}
-	if ret.Path == "" {
-		return nil, fmt.Errorf("failed to resolve location path by %s", dep)
-	}
 	return &ret, nil
 }
 
@@ -457,7 +450,7 @@ func (r *Resolver) lookupCCLibraryByLocation(loc *LibraryLocation) (*CCLibrary, 
 	}
 	cclib, exists := file.cclibMap[loc.CCLibName]
 	if !exists {
-		return nil, fmt.Errorf("failed to find cc_library: %+v", loc)
+		return nil, fmt.Errorf("failed to find cc_library: %+v. cclibMap: %v", loc, file.cclibMap)
 	}
 	return cclib, nil
 }

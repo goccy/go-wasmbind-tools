@@ -20,8 +20,7 @@ ignores:
     name: flex
   - path: external
     name: python_headers
-  - path: protobuf
-    name: timestamp_proto
+  - name: timestamp_proto
 libraries:
   - name: zetasql
     root: zetasql
