@@ -154,15 +154,15 @@ func (r *Resolver) resolveLibraryBuildFiles(lib *LibraryConfig) error {
 			}
 			libDir := filepath.Dir(path)
 			relPath := strings.TrimPrefix(libDir, libRoot)
-			relPathWithRoot := filepath.Join(lib.Root, strings.TrimPrefix(relPath, "/"))
+			relPathWithLibName := filepath.Join(filepath.Base(lib.Root), strings.TrimPrefix(relPath, "/"))
 			file := &File{
-				Path:        relPathWithRoot,
+				Path:        relPathWithLibName,
 				Library:     lib,
 				CCLibraries: libs,
 				cclibMap:    cclibMap,
 				otherLibMap: otherLibMap,
 			}
-			r.libraryFileMap[lib][relPathWithRoot] = file
+			r.libraryFileMap[lib][relPathWithLibName] = file
 			for _, lib := range libs {
 				lib.File = file
 			}
