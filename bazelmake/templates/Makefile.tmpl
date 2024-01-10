@@ -12,6 +12,6 @@ build: {{- range $sources }} out/{{ .Name }}.o {{- end }}
 	$(CC) $(OPTS) $(INCLUDES) $(LINKER_OPTS) -o $(TARGET) {{- range $sources }} out/{{ .Name }}.o{{- end }}
 
 {{ range $sources }}
-out/{{ .Name }}.o:
+out/{{ .Name }}.o: {{ .Path }}
 	$(CC) -o out/{{ .Name }}.o $(OPTS) $(INCLUDES) -c {{ .Path }}
 {{ end }}
