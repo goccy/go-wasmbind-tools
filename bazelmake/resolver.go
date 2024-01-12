@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -68,6 +69,7 @@ type Resolver struct {
 	nameToLibraryMap map[string]*LibraryConfig
 	ignoreMap        map[string]struct{}
 	libraryFileMap   map[*LibraryConfig]LibraryFileMap
+	pathToVariables  map[string]map[string]any
 }
 
 func NewResolver(cfg *Config) *Resolver {
@@ -84,6 +86,7 @@ func NewResolver(cfg *Config) *Resolver {
 		ignoreMap:        ignoreMap,
 		nameToLibraryMap: nameToLibraryMap,
 		libraryFileMap:   make(map[*LibraryConfig]LibraryFileMap),
+		pathToVariables:  make(map[string]map[string]any),
 	}
 }
 
@@ -140,6 +143,7 @@ func (r *Resolver) resolveLibraryBuildFiles(lib *LibraryConfig) error {
 		}
 		switch filepath.Base(path) {
 		case "BUILD", "BUILD.bazel":
+			r.pathToVariables[path] = make(map[string]any)
 			libs, otherLibs, err := r.resolveCCLibraries(path)
 			if err != nil {
 				return err
@@ -189,6 +193,11 @@ func (r *Resolver) resolveCCLibraries(path string) ([]*CCLibrary, []string, erro
 		otherLibs []string
 	)
 	for _, stmt := range tree.Stmt {
+		switch v := stmt.(type) {
+		case *build.AssignExpr:
+			variableName := r.resolveIdentifier(path, v.LHS)
+			r.pathToVariables[path][variableName] = r.resolveExpr(path, v.RHS)
+		}
 		callExpr, ok := stmt.(*build.CallExpr)
 		if !ok {
 			continue
@@ -196,11 +205,15 @@ func (r *Resolver) resolveCCLibraries(path string) ([]*CCLibrary, []string, erro
 		name := r.getText(callExpr.X)
 		switch name {
 		case "cc_library":
-			libs = append(libs, r.resolveCCLibrary(callExpr.List))
+			libs = append(libs, r.resolveCCLibrary(path, callExpr.List))
 		case "cc_proto_library":
-			libs = append(libs, r.resolveCCProtoLibrary(callExpr.List))
+			libs = append(libs, r.resolveCCProtoLibrary(path, callExpr.List))
 		case "proto_library":
-			libs = append(libs, r.resolveProtoLibrary(callExpr.List))
+			libs = append(libs, r.resolveProtoLibrary(path, callExpr.List))
+		case "configure_make":
+			libs = append(libs, r.resolveConfigureMake(path, callExpr.List))
+		case "filegroup":
+			libs = append(libs, r.resolveFilegroup(path, callExpr.List))
 		default:
 			for _, item := range callExpr.List {
 				assignExpr, ok := item.(*build.AssignExpr)
@@ -219,7 +232,7 @@ func (r *Resolver) resolveCCLibraries(path string) ([]*CCLibrary, []string, erro
 	return libs, otherLibs, nil
 }
 
-func (r *Resolver) resolveCCLibrary(list []build.Expr) *CCLibrary {
+func (r *Resolver) resolveCCLibrary(path string, list []build.Expr) *CCLibrary {
 	var ret CCLibrary
 	for _, item := range list {
 		assignExpr, ok := item.(*build.AssignExpr)
@@ -227,90 +240,221 @@ func (r *Resolver) resolveCCLibrary(list []build.Expr) *CCLibrary {
 			continue
 		}
 		kind := r.getText(assignExpr.LHS)
-		rhs := assignExpr.RHS
+		value := r.resolveExpr(path, assignExpr.RHS)
 		switch kind {
 		case "name":
-			ret.Name = r.getText(rhs)
+			ret.Name = r.toString(value)
 		case "hdrs":
-			switch v := rhs.(type) {
-			case *build.CallExpr:
-				log.Printf("%s(%v)", r.getText(v.X), v.List)
-			case *build.ListExpr:
-				ret.Headers = r.filterSource(r.getTexts(v))
-			}
+			ret.Headers = r.filterSource(r.toStrings(value))
 		case "srcs":
-			switch v := rhs.(type) {
-			case *build.CallExpr:
-				log.Printf("%s(%v)", r.getText(v.X), v.List)
-			case *build.ListExpr:
-				ret.Sources = r.filterSource(r.getTexts(v))
-			}
+			ret.Sources = r.filterSource(r.toStrings(value))
 		case "deps":
-			switch v := rhs.(type) {
-			case *build.BinaryExpr:
-			case *build.ListExpr:
-				ret.Dependencies = r.getTexts(v)
-			}
+			ret.Dependencies = r.toStrings(value)
 		case "copts":
-			switch v := rhs.(type) {
-			case *build.Ident:
-				ret.Options = []string{r.getText(v)}
-			case *build.ListExpr:
-				ret.Options = r.getTexts(v)
+			ret.Options = r.toStrings(value)
+		}
+	}
+	return &ret
+}
+
+func (r *Resolver) resolveIdentifier(path string, expr build.Expr) string {
+	switch v := expr.(type) {
+	case *build.Ident:
+		return v.Name
+	case *build.DotExpr:
+		return strings.Join(append(r.toStrings(r.resolveExpr(path, v.X)), v.Name), ".")
+	}
+	return ""
+}
+
+func (r *Resolver) resolveExpr(path string, expr build.Expr) any {
+	switch v := expr.(type) {
+	case *build.Ident:
+		return r.pathToVariables[path][v.Name]
+	case *build.StringExpr:
+		return v.Value
+	case *build.BinaryExpr:
+		left := r.resolveExpr(path, v.X)
+		right := r.resolveExpr(path, v.Y)
+		switch v.Op {
+		case "+":
+			if left == nil && right == nil {
+				return nil
 			}
+			if left == nil {
+				return right
+			}
+			if right == nil {
+				return left
+			}
+			if reflect.TypeOf(left).Kind() == reflect.Slice {
+				return append(append([]string{}, left.([]string)...), right.([]string)...)
+			}
+			return left.(string) + right.(string)
+		default:
+			log.Printf("binary: %s: %v, %v", v.Op, v.X, v.Y)
 		}
-	}
-	return &ret
-}
-
-func (r *Resolver) resolveCCProtoLibrary(list []build.Expr) *CCLibrary {
-	var ret CCLibrary
-	for _, item := range list {
-		assignExpr, ok := item.(*build.AssignExpr)
-		if !ok {
-			continue
-		}
-		kind := r.getText(assignExpr.LHS)
-		rhs := assignExpr.RHS
-		switch kind {
-		case "name":
-			ret.Name = r.getText(rhs)
-		case "deps":
-			ret.Dependencies = r.getTexts(rhs.(*build.ListExpr))
-		}
-	}
-	return &ret
-}
-
-func (r *Resolver) resolveProtoLibrary(list []build.Expr) *CCLibrary {
-	var ret CCLibrary
-	for _, item := range list {
-		assignExpr, ok := item.(*build.AssignExpr)
-		if !ok {
-			continue
-		}
-		kind := r.getText(assignExpr.LHS)
-		rhs := assignExpr.RHS
-		switch kind {
-		case "name":
-			ret.Name = r.getText(rhs)
-		case "srcs":
-			switch v := rhs.(type) {
-			case *build.BinaryExpr:
-				log.Printf("srcs: %+v", v)
-			case *build.ListExpr:
-				for _, src := range r.getTexts(v) {
-					trimmed := strings.TrimSuffix(src, filepath.Ext(src))
-					ret.Sources = append(ret.Sources, fmt.Sprintf("%s.pb.cc", trimmed))
+		return []string{}
+	case *build.CallExpr:
+		fn := r.resolveIdentifier(path, v.X)
+		switch fn {
+		case "glob":
+			fileMap := make(map[string]struct{})
+			dirName := filepath.Dir(path)
+			for _, vv := range v.List {
+				for _, p := range r.toStrings(r.resolveExpr(path, vv)) {
+					globPath := filepath.Join(filepath.Dir(path), p)
+					matches, err := filepath.Glob(globPath)
+					if err != nil {
+						log.Fatalf("failed to run glob(%s)", globPath)
+					}
+					for _, match := range matches {
+						if finfo, _ := os.Stat(match); finfo.IsDir() {
+							submatches, err := filepath.Glob(fmt.Sprintf("%s/*", match))
+							if err != nil {
+								log.Fatalf("failed to run %s*", match)
+							}
+							for _, submatch := range submatches {
+								fileMap[strings.TrimPrefix(submatch, dirName+"/")] = struct{}{}
+							}
+						}
+						fileMap[strings.TrimPrefix(match, dirName+"/")] = struct{}{}
+					}
 				}
 			}
-		case "deps":
-			switch v := rhs.(type) {
-			case *build.Comprehension:
-				log.Printf("deps: %+v", v)
-			case *build.ListExpr:
-				ret.Dependencies = r.getTexts(v)
+			ret := make([]string, 0, len(fileMap))
+			for file := range fileMap {
+				ret = append(ret, file)
 			}
+			sort.Strings(ret)
+			return ret
+		case "select":
+			return []string{}
+		}
+		log.Printf("%s(%v)", r.getText(v.X), v.List)
+		return nil
+	case *build.ListExpr:
+		var ret []string
+		for _, vv := range v.List {
+			ret = append(ret, r.toStrings(r.resolveExpr(path, vv))...)
+		}
+		return ret
+	case *build.LiteralExpr:
+		return []string{v.Token}
+	case *build.AssignExpr:
+		variableName := r.resolveIdentifier(path, v.LHS)
+		r.pathToVariables[path][variableName] = r.resolveExpr(path, v.RHS)
+	case *build.Comprehension:
+		var ret []string
+		for _, clause := range v.Clauses {
+			ret = append(ret, r.resolveClause(path, clause, v.Body)...)
+		}
+		return ret
+	case *build.DictExpr:
+		return nil
+	default:
+		log.Printf("unknown ast: %T", v)
+	}
+	return []string{}
+}
+
+func (r *Resolver) resolveClause(path string, clause build.Expr, body build.Expr) []string {
+	switch v := clause.(type) {
+	case *build.ForClause:
+		var ret []string
+		variableName := r.resolveIdentifier(path, v.Vars)
+		for _, iter := range r.toStrings(r.resolveExpr(path, v.X)) {
+			r.pathToVariables[path][variableName] = iter
+			ret = append(ret, r.toStrings(r.resolveExpr(path, body))...)
+		}
+		return ret
+	}
+	log.Printf("unsupported clause type: %T", clause)
+	return nil
+}
+
+func (r *Resolver) resolveCCProtoLibrary(path string, list []build.Expr) *CCLibrary {
+	var ret CCLibrary
+	for _, item := range list {
+		assignExpr, ok := item.(*build.AssignExpr)
+		if !ok {
+			continue
+		}
+		kind := r.getText(assignExpr.LHS)
+		value := r.resolveExpr(path, assignExpr.RHS)
+		switch kind {
+		case "name":
+			ret.Name = r.toString(value)
+		case "deps":
+			ret.Dependencies = r.toStrings(value)
+		}
+	}
+	return &ret
+}
+
+func (r *Resolver) resolveProtoLibrary(path string, list []build.Expr) *CCLibrary {
+	var ret CCLibrary
+	for _, item := range list {
+		assignExpr, ok := item.(*build.AssignExpr)
+		if !ok {
+			continue
+		}
+		kind := r.getText(assignExpr.LHS)
+		value := r.resolveExpr(path, assignExpr.RHS)
+		switch kind {
+		case "name":
+			ret.Name = r.toString(value)
+		case "srcs":
+			for _, src := range r.toStrings(value) {
+				trimmed := strings.TrimSuffix(src, filepath.Ext(src))
+				ret.Sources = append(ret.Sources, fmt.Sprintf("%s.pb.cc", trimmed))
+			}
+		case "deps":
+			ret.Dependencies = r.toStrings(value)
+		}
+	}
+	if ret.Name == "wkt_proto" {
+		fmt.Println("found wkt_proto", ret)
+		fmt.Println("path to variables", r.pathToVariables[path])
+	}
+	return &ret
+}
+
+func (r *Resolver) resolveConfigureMake(path string, list []build.Expr) *CCLibrary {
+	var ret CCLibrary
+	for _, item := range list {
+		assignExpr, ok := item.(*build.AssignExpr)
+		if !ok {
+			continue
+		}
+		kind := r.getText(assignExpr.LHS)
+		value := r.resolveExpr(path, assignExpr.RHS)
+		switch kind {
+		case "name":
+			ret.Name = r.toString(value)
+		case "srcs":
+			ret.Sources = r.filterSource(r.toStrings(value))
+		case "lib_source":
+			ret.Dependencies = r.toStrings(value)
+		}
+	}
+	return &ret
+}
+
+func (r *Resolver) resolveFilegroup(path string, list []build.Expr) *CCLibrary {
+	var ret CCLibrary
+	for _, item := range list {
+		assignExpr, ok := item.(*build.AssignExpr)
+		if !ok {
+			continue
+		}
+		kind := r.getText(assignExpr.LHS)
+		value := r.resolveExpr(path, assignExpr.RHS)
+		switch kind {
+		case "name":
+			ret.Name = r.toString(value)
+		case "srcs":
+			ret.Sources = r.filterSource(r.toStrings(value))
 		}
 	}
 	return &ret
@@ -319,13 +463,23 @@ func (r *Resolver) resolveProtoLibrary(list []build.Expr) *CCLibrary {
 func (r *Resolver) filterSource(srcs []string) []string {
 	filtered := make([]string, 0, len(srcs))
 	for _, src := range srcs {
-		if filepath.Ext(src) == ".inc" {
+		ext := filepath.Ext(src)
+		if ext == ".c" {
+			filtered = append(filtered, src)
 			continue
 		}
-		if filepath.Ext(src) == ".h" {
+		if strings.Contains(ext, ".cc") {
+			filtered = append(filtered, src)
 			continue
 		}
-		filtered = append(filtered, src)
+		if strings.Contains(ext, ".cx") {
+			filtered = append(filtered, src)
+			continue
+		}
+		if strings.Contains(ext, ".cpp") {
+			filtered = append(filtered, src)
+			continue
+		}
 	}
 	return filtered
 }
@@ -337,6 +491,9 @@ func (r *Resolver) resolveLibraryDependencies(file *File) error {
 			loc, err := r.resolveLibraryLocation(file, dep)
 			if err != nil {
 				return err
+			}
+			if loc == nil {
+				continue
 			}
 			depLib, err := r.lookupCCLibraryByLocation(loc)
 			if err != nil {
@@ -465,10 +622,30 @@ func (r *Resolver) getText(expr build.Expr) string {
 	return ""
 }
 
-func (r *Resolver) getTexts(list *build.ListExpr) []string {
-	texts := make([]string, 0, len(list.List))
-	for _, value := range list.List {
-		texts = append(texts, r.getText(value))
+func (r *Resolver) toString(v any) string {
+	if v == nil {
+		return ""
 	}
-	return texts
+	switch s := v.(type) {
+	case []string:
+		if len(s) != 0 {
+			return s[0]
+		}
+	case string:
+		return s
+	}
+	return ""
+}
+
+func (r *Resolver) toStrings(v any) []string {
+	if v == nil {
+		return nil
+	}
+	switch s := v.(type) {
+	case []string:
+		return s
+	case string:
+		return []string{s}
+	}
+	return nil
 }

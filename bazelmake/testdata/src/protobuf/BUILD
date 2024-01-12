@@ -295,7 +295,6 @@ cc_library(
     includes = ["src/"],
     linkopts = LINK_OPTS,
     visibility = ["//visibility:public"],
-    deps = [":protobuf_lite"] + PROTOBUF_DEPS,
 )
 
 # This provides just the header files for use in projects that need to build
@@ -370,6 +369,25 @@ LITE_WELL_KNOWN_PROTO_MAP = {
     ),
     "wrappers": ("src/google/protobuf/wrappers.proto", []),
 }
+
+WELL_KNOWN_TYPES = [
+    "any",
+    "api",
+    "duration",
+    "empty",
+    "field_mask",
+    "source_context",
+    "struct",
+    "timestamp",
+    "type",
+    "wrappers",
+]
+
+proto_library(
+    name = "wkt_proto",
+    visibility = ["//visibility:private"],
+    deps = [wkt + "_proto" for wkt in WELL_KNOWN_TYPES],
+)
 
 LITE_WELL_KNOWN_PROTOS = [value[0] for value in LITE_WELL_KNOWN_PROTO_MAP.values()]
 
