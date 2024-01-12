@@ -106,7 +106,9 @@ cc_library(
         "//absl/debugging:stacktrace",
         "//absl/debugging:symbolize",
         "//absl/time",
-    ],
+    ] + select({
+        "//conditions:default": [],
+    }),
 )
 
 cc_test(
